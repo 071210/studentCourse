@@ -1,4 +1,3 @@
-// server.js - Updated with Python MATLAB Logic Integration
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -22,7 +21,16 @@ app.use((req, res, next) => {
 
 // API Health Check Endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString(), message: 'API running with Python MATLAB logic' });
+  const status = {
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    pythonIntegration: recommendationEngine.isInitialized,
+    message: recommendationEngine.isInitialized 
+      ? 'API running with Python MATLAB logic' 
+      : 'API running with JavaScript fallback',
+    system: 'Course Recommendation System v1.0'
+  };
+  res.json(status);
 });
 
 // Python MATLAB Logic Integration
@@ -34,6 +42,12 @@ class PythonMATLABRecommendationEngine {
 
   async initializeEngine() {
     try {
+      // Check Python version
+      const pythonCheck = await this.checkPythonVersion();
+      if (!pythonCheck.valid) {
+        console.warn(`⚠️ Python version ${pythonCheck.version} may not be compatible`);
+      }
+      
       // Check if Python MATLAB logic file exists
       const pythonFile = path.join(__dirname, 'matlab_logic.py');
       
@@ -51,6 +65,23 @@ class PythonMATLABRecommendationEngine {
       console.error('Failed to initialize Python MATLAB engine:', error);
       this.isInitialized = false;
     }
+  }
+
+  async checkPythonVersion() {
+    return new Promise((resolve) => {
+      const python = spawn('python3', ['--version']);
+      let version = '';
+      
+      python.stdout.on('data', (data) => version = data.toString());
+      python.on('close', () => {
+        resolve({
+          version: version.trim(),
+          valid: version.includes('Python 3')
+        });
+      });
+      
+      python.on('error', () => resolve({ version: 'unknown', valid: false }));
+    });
   }
 
   async callPythonMATLABRecommendation(inputData) {
@@ -168,16 +199,16 @@ except Exception as e:
           python.stderr.on('data', (data) => {
             const text = data.toString();
             errorOutput += text;
-            if (!text.includes('UserWarning')) {  // Ignore common warnings
+            const ignorable = ['UserWarning', 'DeprecationWarning', 'FutureWarning'];
+            if (!ignorable.some(w => text.includes(w))) {
               console.error('⚠️ Python Error:', text.trim());
             }
           });
 
           python.on('close', async (code) => {
             try {
-              // Clean up temporary script file
-              await fs.unlink(scriptFile).catch(() => {});
-              await fs.unlink(tempInputFile).catch(() => {});
+              // Clean up temporary files
+              await this.cleanupTempFiles([scriptFile, tempInputFile]);
 
               console.log(`🏁 Python process exited with code: ${code}`);
 
@@ -204,9 +235,7 @@ except Exception as e:
 
           python.on('error', async (error) => {
             // Clean up on error
-            await fs.unlink(scriptFile).catch(() => {});
-            await fs.unlink(tempInputFile).catch(() => {});
-            await fs.unlink(tempOutputFile).catch(() => {});
+            await this.cleanupTempFiles([scriptFile, tempInputFile, tempOutputFile]);
             console.error('❌ Python spawn error:', error.message);
             reject(error);
           });
@@ -215,7 +244,14 @@ except Exception as e:
     });
   }
 
-  // Enhanced JavaScript fallback (same as before, but improved)
+  async cleanupTempFiles(files) {
+    try {
+      await Promise.all(files.map(f => fs.unlink(f).catch(() => {})));
+    } catch (error) {
+      console.error('Cleanup error:', error);
+    }
+  }
+
   generateFallbackRecommendation(inputData) {
     console.log('🔄 Using enhanced JavaScript fallback algorithm');
     const courses = ['Gaming', 'Web Development', 'Fuzzy Logic', 'Database Design', 'Software Validation & Verification'];
